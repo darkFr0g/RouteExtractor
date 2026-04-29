@@ -5,6 +5,13 @@
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Route Sheet Extractor</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Route Sheet">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1917">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -51,6 +58,9 @@ body{
 .hdr-title{font-size:22px;font-weight:700;letter-spacing:-.03em;color:var(--ink);margin-bottom:0}
 .hdr-title span{border-bottom:2px solid var(--ink)}
 .vbadge{font-size:10px;font-weight:700;background:var(--border);color:var(--ink);padding:2px 7px;border-radius:var(--radius-xs);font-family:var(--font-mono);display:inline-block;margin-bottom:10px;letter-spacing:.06em}
+/* owned jobs tab accent */
+.tab.owned.active{border-bottom-color:var(--ink)}
+
 
 .name-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:10px}
 .name-box label{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-4);margin-bottom:7px}
@@ -157,7 +167,7 @@ body{
 <div class="wrap">
 
   <div class="hdr">
-    <div class="vbadge">v3.0</div>
+    <div class="vbadge">v4.0</div>
     <h1 class="hdr-title">Locations for <span id="headingName">Jeremiah Flavin</span></h1>
   </div>
 
@@ -333,7 +343,46 @@ function processFile(file){
       if(!headers) throw new Error('Could not find column headers.');
       var myJobs = [];
       SHEETS.forEach(function(sn){ if(sheetJobs[sn]) myJobs = myJobs.concat(sheetJobs[sn].jobs); });
-      allData = {headers: headers, flavin: myJobs, sheets: sheetJobs, ccis: ccis, contractorSheets: SHEETS, name: NAME};
+
+      // Owned Jobs — scan all sheets for Job Owner match
+      var ownedJobs = [];
+      var ownedSeen = {};
+      var joIdx = headers.indexOf('Job Owner');
+      if(joIdx !== -1){
+        SHEETS.forEach(function(sn){
+          if(!sheetJobs[sn]) return;
+          var ws2 = wb.Sheets[sn];
+          var rows2 = XLSX.utils.sheet_to_json(ws2, {header:1, defval:null});
+          var hrow2 = -1;
+          for(var i3 = 0; i3 < Math.min(rows2.length, 8); i3++){
+            if(rows2[i3].indexOf('Job Owner') !== -1){ hrow2 = i3; break; }
+          }
+          if(hrow2 === -1) return;
+          var lastF2 = '';
+          var company2 = (rows2[1] && rows2[1][4]) ? String(rows2[1][4]).trim() : sn;
+          var joIdx2 = rows2[hrow2].indexOf('Job Owner');
+          for(var r2 = hrow2+1; r2 < rows2.length; r2++){
+            var row2 = rows2[r2];
+            if(!row2 || row2.every(function(c){ return c===null||c===''; })) continue;
+            if(row2[0] && String(row2[0]).trim() !== '') lastF2 = String(row2[0]).trim();
+            var joVal = row2[joIdx2];
+            if(joVal && String(joVal).trim() === NAME){
+              if(!row2[0] || String(row2[0]).trim() === ''){ row2 = row2.slice(); row2[0] = lastF2; }
+              var wdI2 = headers.indexOf('Work Description');
+              var wd2 = row2[wdI2] ? String(row2[wdI2]).trim() : '';
+              var key2 = String(row2[headers.indexOf('Ticket #')]||'')+'|'+String(row2[headers.indexOf('Location')]||'')+'|'+wd2;
+              if(!ownedSeen[key2]){
+                ownedSeen[key2] = true;
+                var jr2 = row2.slice();
+                jr2._co = company2;
+                ownedJobs.push(jr2);
+              }
+            }
+          }
+        });
+      }
+
+      allData = {headers: headers, flavin: myJobs, owned: ownedJobs, sheets: sheetJobs, ccis: ccis, contractorSheets: SHEETS, name: NAME};
       renderResults();
     } catch(err){
       setStatus('err', 'Error: ' + err.message);
@@ -362,7 +411,10 @@ function renderResults(){
 
   tabBar.innerHTML = '';
   var lastName = allData.name.split(' ').pop();
-  var tabs = [{id:'flavin', label: lastName, jobs: allData.flavin}];
+  var tabs = [
+    {id:'flavin', label: lastName, jobs: allData.flavin},
+    {id:'owned',  label: 'Owned',  jobs: allData.owned}
+  ];
   allData.contractorSheets.forEach(function(sn){
     var d = allData.sheets[sn];
     if(d) tabs.push({id: sn, label: sn, jobs: d.jobs});
@@ -375,7 +427,7 @@ function renderResults(){
     btn.addEventListener('click', function(){
       document.querySelectorAll('.tab').forEach(function(x){ x.classList.remove('active'); });
       btn.classList.add('active');
-      if(t.id === 'flavin'){
+      if(t.id === 'flavin' || t.id === 'owned'){
         renderFlavinJobs(t.jobs);
       } else {
         renderListJobs(t.jobs);
@@ -515,6 +567,13 @@ function renderListJobs(jobs){
 }
 
 })();
+</script>
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  });
+}
 </script>
 </body>
 </html>
